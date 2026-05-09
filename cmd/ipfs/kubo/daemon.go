@@ -30,6 +30,7 @@ import (
 	corehttp "github.com/ipfs/kubo/core/corehttp"
 	options "github.com/ipfs/kubo/core/coreiface/options"
 	corerepo "github.com/ipfs/kubo/core/corerepo"
+	"github.com/ipfs/kubo/core/measure"
 	libp2p "github.com/ipfs/kubo/core/node/libp2p"
 	nodeMount "github.com/ipfs/kubo/fuse/node"
 	fsrepo "github.com/ipfs/kubo/repo/fsrepo"
@@ -524,6 +525,18 @@ func daemonFunc(req *cmds.Request, re cmds.ResponseEmitter, env cmds.Environment
 		return err
 	}
 	node.IsDaemon = true
+
+	// +++ measurement service +++
+	measureCfg, err := measure.LoadFromEnv()
+	if err != nil {
+		return fmt.Errorf("measure: invalid config: %w", err)
+	}
+	measureService, err := measure.Start(req.Context, node, measureCfg)
+	if err != nil {
+		return fmt.Errorf("measure: failed to start service: %w", err)
+	}
+	defer measureService.Close()
+	// +++ end measurement service +++
 
 	if node.PNetFingerprint != nil {
 		fmt.Println("Swarm is limited to private network of peers with the swarm key")
