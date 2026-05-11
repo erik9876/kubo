@@ -7,16 +7,18 @@ import (
 	"sync"
 
 	"github.com/ipfs/kubo/core"
+	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/host"
 )
 
 type Service struct {
-	host     host.Host
-	logger   *Logger
-	sampler  *StateSampler
-	notifiee *ConnNotifiee
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
+	host       host.Host
+	logger     *Logger
+	sampler    *StateSampler
+	notifiee   *ConnNotifiee
+	subscriber *LookupSubscriber
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
 }
 
 func Start(ctx context.Context, node *core.IpfsNode, cfg Config) (*Service, error) {
@@ -34,6 +36,8 @@ func Start(ctx context.Context, node *core.IpfsNode, cfg Config) (*Service, erro
 	notifiee := &ConnNotifiee{logger: logger}
 	node.PeerHost.Network().Notify(notifiee)
 
+	subscriber := newLookupSubscriber(logger)
+
 	s := &Service{
 		host:   node.PeerHost,
 		logger: logger,
@@ -43,12 +47,18 @@ func Start(ctx context.Context, node *core.IpfsNode, cfg Config) (*Service, erro
 			logger:   logger,
 			interval: cfg.SampleInterval,
 		},
-		notifiee: notifiee,
-		cancel:   cancel,
+		notifiee:   notifiee,
+		subscriber: subscriber,
+		cancel:     cancel,
 	}
 
 	s.wg.Add(1)
 	go s.sampler.Run(sampleCtx, &s.wg)
+
+	s.wg.Add(1)
+	go subscriber.Run(sampleCtx, &s.wg)
+
+	dht.SetGlobalLookupHook(subscriber.onEvent)
 
 	fmt.Fprintf(os.Stderr, "measure: service started in mode=%s logDir=%s\n", cfg.Mode, cfg.LogDir)
 
@@ -60,6 +70,8 @@ func (s *Service) Close() error {
 		return nil
 	}
 	fmt.Fprintf(os.Stderr, "measure: service stopping\n")
+
+	dht.ClearGlobalLookupHook()
 
 	if s.notifiee != nil {
 		s.host.Network().StopNotify(s.notifiee)
