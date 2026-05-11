@@ -12,13 +12,14 @@ import (
 )
 
 type Service struct {
-	host       host.Host
-	logger     *Logger
-	sampler    *StateSampler
-	notifiee   *ConnNotifiee
-	subscriber *LookupSubscriber
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
+	host             host.Host
+	logger           *Logger
+	sampler          *StateSampler
+	notifiee         *ConnNotifiee
+	lookupSubscriber *LookupSubscriber
+	recordSubscriber *PeerRecordSubscriber
+	cancel           context.CancelFunc
+	wg               sync.WaitGroup
 }
 
 func Start(ctx context.Context, node *core.IpfsNode, cfg Config) (*Service, error) {
@@ -36,7 +37,13 @@ func Start(ctx context.Context, node *core.IpfsNode, cfg Config) (*Service, erro
 	notifiee := &ConnNotifiee{logger: logger}
 	node.PeerHost.Network().Notify(notifiee)
 
-	subscriber := newLookupSubscriber(logger)
+	lookupSubscriber := newLookupSubscriber(logger)
+
+	recordSubscriber, err := newPeerRecordSubscriber(node.PeerHost, logger)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to create peer record subscriber: %w", err)
+	}
 
 	s := &Service{
 		host:   node.PeerHost,
@@ -47,18 +54,22 @@ func Start(ctx context.Context, node *core.IpfsNode, cfg Config) (*Service, erro
 			logger:   logger,
 			interval: cfg.SampleInterval,
 		},
-		notifiee:   notifiee,
-		subscriber: subscriber,
-		cancel:     cancel,
+		notifiee:         notifiee,
+		lookupSubscriber: lookupSubscriber,
+		recordSubscriber: recordSubscriber,
+		cancel:           cancel,
 	}
 
 	s.wg.Add(1)
 	go s.sampler.Run(sampleCtx, &s.wg)
 
 	s.wg.Add(1)
-	go subscriber.Run(sampleCtx, &s.wg)
+	go lookupSubscriber.Run(sampleCtx, &s.wg)
 
-	dht.SetGlobalLookupHook(subscriber.onEvent)
+	dht.SetGlobalLookupHook(lookupSubscriber.onEvent)
+
+	s.wg.Add(1)
+	go recordSubscriber.Run(sampleCtx, &s.wg)
 
 	fmt.Fprintf(os.Stderr, "measure: service started in mode=%s logDir=%s\n", cfg.Mode, cfg.LogDir)
 
