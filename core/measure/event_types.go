@@ -58,4 +58,10 @@ const (
 	// Without these, a busy 24h run could lose events silently.
 	EventLoggerDropped = "logger-dropped"
 	EventLookupDropped = "lookup-dropped"
+
+	// Periodic snapshot of incoming DHT-query counts per message type (PDF S.4
+	// optional: "eingehende DHT-Queries als Counter zur Charakterisierung der
+	// Gesamtaktivität"). Emitted every 60s plus once at shutdown. Counters are
+	// monotonic; diff consecutive samples for per-window rates.
+	EventDHTIncoming = "dht-incoming"
 )

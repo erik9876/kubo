@@ -77,6 +77,10 @@ func Start(ctx context.Context, node *core.IpfsNode, cfg Config) (*Service, erro
 	s.wg.Add(1)
 	go recordSubscriber.Run(sampleCtx, &s.wg)
 
+	incomingSubscriber := newDHTIncomingSubscriber(logger)
+	s.wg.Add(1)
+	go incomingSubscriber.Run(sampleCtx, &s.wg)
+
 	if cfg.Mode == ModePonger {
 		s.peerstoreTracker = newPeerstoreTracker(node.PeerHost.Peerstore(), cfg.PeerstoreTrackInterval)
 		s.wg.Add(1)
