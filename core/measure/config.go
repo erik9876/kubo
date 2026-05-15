@@ -16,12 +16,13 @@ const (
 )
 
 type Config struct {
-	Mode           Mode
-	LogDir         string
-	SampleInterval time.Duration
-	OOBListenAddr  string
-	PartnerAddr    string
-	PartnerPeerID  string
+	Mode                   Mode
+	LogDir                 string
+	SampleInterval         time.Duration
+	PeerstoreTrackInterval time.Duration
+	OOBListenAddr          string
+	PartnerAddr            string
+	PartnerPeerID          string
 }
 
 func LoadFromEnv() (Config, error) {
@@ -57,6 +58,15 @@ func LoadFromEnv() (Config, error) {
 		interval = d
 	}
 
+	peerstoreTrackInterval := 30 * time.Second
+	if s, isPresent := os.LookupEnv("IPFS_MEASURE_PEERSTORE_TRACK_INTERVAL"); isPresent && s != "" {
+		d, err := time.ParseDuration(s)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid IPFS_MEASURE_PEERSTORE_TRACK_INTERVAL: %w", err)
+		}
+		peerstoreTrackInterval = d
+	}
+
 	oobListenAddr, isPresent := os.LookupEnv("IPFS_MEASURE_OOB_LISTEN_ADDR")
 	if mode == ModePonger && !isPresent {
 		return Config{}, fmt.Errorf("IPFS_MEASURE_OOB_LISTEN_ADDR must be set for Ponger")
@@ -73,11 +83,12 @@ func LoadFromEnv() (Config, error) {
 	}
 
 	return Config{
-		Mode:           mode,
-		LogDir:         logDir,
-		SampleInterval: interval,
-		OOBListenAddr:  oobListenAddr,
-		PartnerAddr:    partnerAddr,
-		PartnerPeerID:  partnerPeerID,
+		Mode:                   mode,
+		LogDir:                 logDir,
+		SampleInterval:         interval,
+		PeerstoreTrackInterval: peerstoreTrackInterval,
+		OOBListenAddr:          oobListenAddr,
+		PartnerAddr:            partnerAddr,
+		PartnerPeerID:          partnerPeerID,
 	}, nil
 }

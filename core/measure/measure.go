@@ -9,6 +9,7 @@ import (
 	"github.com/ipfs/kubo/core"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type Service struct {
@@ -18,6 +19,9 @@ type Service struct {
 	notifiee         *ConnNotifiee
 	lookupSubscriber *LookupSubscriber
 	recordSubscriber *PeerRecordSubscriber
+	oobPonger        *OOBPonger
+	oobPinger        *OOBPinger
+	peerstoreTracker *PeerstoreTracker
 	cancel           context.CancelFunc
 	wg               sync.WaitGroup
 }
@@ -70,6 +74,30 @@ func Start(ctx context.Context, node *core.IpfsNode, cfg Config) (*Service, erro
 
 	s.wg.Add(1)
 	go recordSubscriber.Run(sampleCtx, &s.wg)
+
+	if cfg.Mode == ModePonger {
+		s.peerstoreTracker = newPeerstoreTracker(node.PeerHost.Peerstore(), cfg.PeerstoreTrackInterval)
+		s.wg.Add(1)
+		go s.peerstoreTracker.Run(sampleCtx, &s.wg)
+
+		s.oobPonger = newOOBPonger(cfg.OOBListenAddr, logger, node.PeerHost, node.DHT.WAN, s.peerstoreTracker)
+		s.wg.Add(1)
+		go s.oobPonger.Run(sampleCtx, &s.wg)
+	}
+	if cfg.Mode == ModePinger {
+		s.oobPinger = newOOBPinger(cfg.PartnerAddr, logger)
+		s.wg.Add(1)
+		go s.oobPinger.Run(sampleCtx, &s.wg)
+
+		partnerPID, err := peer.Decode(cfg.PartnerPeerID)
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("invalid PartnerPeerID %q: %w", cfg.PartnerPeerID, err)
+		}
+		pinger := newPinger(node.PeerHost, node.DHT.WAN, partnerPID, s.oobPinger, logger, newSequencer())
+		s.wg.Add(1)
+		go pinger.Run(sampleCtx, &s.wg)
+	}
 
 	fmt.Fprintf(os.Stderr, "measure: service started in mode=%s logDir=%s\n", cfg.Mode, cfg.LogDir)
 
