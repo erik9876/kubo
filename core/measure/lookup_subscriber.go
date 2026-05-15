@@ -60,6 +60,8 @@ func (s *LookupSubscriber) Run(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 	staleTick := time.NewTicker(30 * time.Second)
 	defer staleTick.Stop()
+	droppedTick := time.NewTicker(60 * time.Second)
+	defer droppedTick.Stop()
 
 	for {
 		select {
@@ -67,10 +69,22 @@ func (s *LookupSubscriber) Run(ctx context.Context, wg *sync.WaitGroup) {
 			s.handleEvent(ev)
 		case <-staleTick.C:
 			s.flushStale()
+		case <-droppedTick.C:
+			s.emitDropped()
 		case <-ctx.Done():
+			// Final flush so the end-of-run drop total is on disk even
+			// if no full 60s tick happened since the last burst.
+			s.emitDropped()
+			s.flushAll()
 			return
 		}
 	}
+}
+
+func (s *LookupSubscriber) emitDropped() {
+	s.logger.Log(EventLookupDropped, droppedPayload{
+		Dropped: atomic.LoadUint64(&s.dropped),
+	})
 }
 
 func (s *LookupSubscriber) handleEvent(event *dht.LookupEvent) {
@@ -114,6 +128,13 @@ func (s *LookupSubscriber) emit(id uuid.UUID, state *lookupState, terminateReaso
 		NumUnreachable:  len(state.unreachable),
 		TerminateReason: terminateReason,
 	})
+}
+
+func (s *LookupSubscriber) flushAll() {
+	for id, state := range s.states {
+		s.emit(id, state, "shutdown")
+		delete(s.states, id)
+	}
 }
 
 func (s *LookupSubscriber) flushStale() {

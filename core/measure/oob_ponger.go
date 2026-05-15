@@ -52,6 +52,8 @@ func (ps *OOBPonger) Run(ctx context.Context, wg *sync.WaitGroup) {
 		ln.Close()
 	}()
 
+	var connWg sync.WaitGroup
+	defer connWg.Wait()
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -66,16 +68,21 @@ func (ps *OOBPonger) Run(ctx context.Context, wg *sync.WaitGroup) {
 			tcpConn.SetKeepAlive(true)
 			tcpConn.SetKeepAlivePeriod(30 * time.Second)
 		}
-		go ps.handleConn(ctx, conn)
+		connWg.Add(1)
+		go ps.handleConn(ctx, conn, &connWg)
 	}
 }
 
-func (ps *OOBPonger) handleConn(ctx context.Context, conn net.Conn) {
+func (ps *OOBPonger) handleConn(ctx context.Context, conn net.Conn, wg *sync.WaitGroup) {
+	defer wg.Done()
 	defer conn.Close()
 
 	var writeMu sync.Mutex
 	queryCh := make(chan oobQuery, 8)
 	connCtx, cancel := context.WithCancel(ctx)
+
+	var workerWg sync.WaitGroup
+	defer workerWg.Wait()
 	defer cancel()
 
 	// Close conn when parent ctx (service shutdown) fires,
@@ -85,7 +92,8 @@ func (ps *OOBPonger) handleConn(ctx context.Context, conn net.Conn) {
 		conn.Close()
 	}()
 
-	go ps.runWorker(connCtx, cancel, conn, &writeMu, queryCh)
+	workerWg.Add(1)
+	go ps.runWorker(connCtx, cancel, conn, &writeMu, queryCh, &workerWg)
 
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
@@ -103,7 +111,7 @@ func (ps *OOBPonger) handleConn(ctx context.Context, conn net.Conn) {
 				fmt.Fprintf(os.Stderr, "measure: oob write ack failed: %v\n", err)
 				return
 			}
-			ps.logger.Log("ponger-query-recv", m)
+			ps.logger.Log(EventPongerQueryRecv, m)
 			queryCh <- m
 		default:
 			// Pinger only sends queries; anything else is protocol error.
@@ -128,14 +136,23 @@ type PongerQueryPayload struct {
 	ConnectFallbackErr string `json:"connect_fallback_err,omitempty"`
 	PeerstoreAgeMs     int64  `json:"peerstore_age_ms,omitempty"`
 
-	UptimeMs      int64 `json:"uptime_ms"`
-	PeerstoreSize int   `json:"peerstore_size"`
-	ActiveConns   int   `json:"active_conns"`
+	// NumAddrs is the count of multiaddrs the ponger had for the target at
+	// the point that determined the case. PLAN.md:547 contract:
+	//   Case I        -> len(Peerstore.Addrs(target))     (known multiaddrs)
+	//   Case II_ok    -> len(Peerstore.Addrs(target))     (used for connect)
+	//   Case II_fail_III, III -> len(FindPeer.Addrs)      (from DHT result)
+	// 0 in II_fail_III/III with lookup_err set means the lookup yielded nothing.
+	NumAddrs int `json:"num_addrs"`
+
+	UptimeMs      uint64 `json:"uptime_ms"`
+	PeerstoreSize int    `json:"peerstore_size"`
+	ActiveConns   int    `json:"active_conns"`
 
 	ParseErr string `json:"parse_err,omitempty"`
 }
 
-func (ps *OOBPonger) runWorker(ctx context.Context, cancel context.CancelFunc, conn net.Conn, writeMu *sync.Mutex, queryCh <-chan oobQuery) {
+func (ps *OOBPonger) runWorker(ctx context.Context, cancel context.CancelFunc, conn net.Conn, writeMu *sync.Mutex, queryCh <-chan oobQuery, wg *sync.WaitGroup) {
+	defer wg.Done()
 	for {
 		select {
 		case <-ctx.Done():
@@ -163,7 +180,7 @@ func (ps *OOBPonger) handleQuery(ctx context.Context, q oobQuery) (PongerQueryPa
 	payload := PongerQueryPayload{
 		QueryID:       q.QueryID,
 		Strategy:      q.Strategy,
-		UptimeMs:      time.Since(ps.startTime).Milliseconds(),
+		UptimeMs:      uint64(time.Since(ps.startTime).Milliseconds()),
 		PeerstoreSize: len(ps.host.Peerstore().Peers()),
 		ActiveConns:   len(ps.host.Network().Conns()),
 	}
@@ -177,6 +194,8 @@ func (ps *OOBPonger) handleQuery(ctx context.Context, q oobQuery) (PongerQueryPa
 
 	if len(ps.host.Network().ConnsToPeer(target)) > 0 {
 		payload.CasePath = "I"
+		payload.TotalMs = 0
+		payload.NumAddrs = len(ps.host.Peerstore().Addrs(target))
 		return payload, newOOBDone(q.QueryID, true, "")
 	}
 
@@ -194,6 +213,7 @@ func (ps *OOBPonger) handleQuery(ctx context.Context, q oobQuery) (PongerQueryPa
 
 		if initErr == nil {
 			payload.CasePath = "II_ok"
+			payload.NumAddrs = len(addrs)
 			payload.TotalMs = payload.ConnectInitialMs
 			return payload, newOOBDone(q.QueryID, true, "")
 		}
@@ -202,13 +222,25 @@ func (ps *OOBPonger) handleQuery(ctx context.Context, q oobQuery) (PongerQueryPa
 		payload.ConnectInitialErr = initErr.Error()
 		ps.findPeerAndConnect(ctx, q.Strategy+"-fallback", target, &payload)
 		payload.TotalMs = payload.ConnectInitialMs + payload.LookupMs + payload.ConnectFallbackMs
-		return payload, newOOBDone(q.QueryID, true, "")
+		ok, errStr := forwardingOutcome(&payload)
+		return payload, newOOBDone(q.QueryID, ok, errStr)
 	}
 
 	payload.CasePath = "III"
 	ps.findPeerAndConnect(ctx, q.Strategy, target, &payload)
 	payload.TotalMs = payload.LookupMs + payload.ConnectFallbackMs
-	return payload, newOOBDone(q.QueryID, true, "")
+	ok, errStr := forwardingOutcome(&payload)
+	return payload, newOOBDone(q.QueryID, ok, errStr)
+}
+
+func forwardingOutcome(payload *PongerQueryPayload) (bool, string) {
+	if payload.LookupErr != "" {
+		return false, "lookup: " + payload.LookupErr
+	}
+	if payload.ConnectFallbackErr != "" {
+		return false, "connect: " + payload.ConnectFallbackErr
+	}
+	return true, ""
 }
 
 func (ps *OOBPonger) findPeerAndConnect(parent context.Context, originSuffix string, target peer.ID, payload *PongerQueryPayload) {
@@ -228,6 +260,7 @@ func (ps *OOBPonger) findPeerAndConnect(parent context.Context, originSuffix str
 		payload.LookupErr = "no addrs"
 		return
 	}
+	payload.NumAddrs = len(addrInfo.Addrs)
 
 	connectStart := time.Now()
 	connErr := ps.host.Connect(ctx, addrInfo)

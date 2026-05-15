@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/ipfs/kubo/core"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
@@ -53,10 +54,11 @@ func Start(ctx context.Context, node *core.IpfsNode, cfg Config) (*Service, erro
 		host:   node.PeerHost,
 		logger: logger,
 		sampler: &StateSampler{
-			host:     node.PeerHost,
-			ps:       node.PeerHost.Peerstore(),
-			logger:   logger,
-			interval: cfg.SampleInterval,
+			host:      node.PeerHost,
+			ps:        node.PeerHost.Peerstore(),
+			logger:    logger,
+			interval:  cfg.SampleInterval,
+			startTime: time.Now(),
 		},
 		notifiee:         notifiee,
 		lookupSubscriber: lookupSubscriber,
@@ -94,7 +96,7 @@ func Start(ctx context.Context, node *core.IpfsNode, cfg Config) (*Service, erro
 			cancel()
 			return nil, fmt.Errorf("invalid PartnerPeerID %q: %w", cfg.PartnerPeerID, err)
 		}
-		pinger := newPinger(node.PeerHost, node.DHT.WAN, partnerPID, s.oobPinger, logger, newSequencer())
+		pinger := newPinger(node.PeerHost, node.DHT.WAN, partnerPID, s.oobPinger, cfg.PingerInterval, logger, newSequencer())
 		s.wg.Add(1)
 		go pinger.Run(sampleCtx, &s.wg)
 	}

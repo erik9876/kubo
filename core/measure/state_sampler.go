@@ -11,10 +11,11 @@ import (
 )
 
 type StateSampler struct {
-	host     host.Host
-	ps       peerstore.Peerstore
-	logger   *Logger
-	interval time.Duration
+	host      host.Host
+	ps        peerstore.Peerstore
+	logger    *Logger
+	interval  time.Duration
+	startTime time.Time
 }
 
 type stateSamplePayload struct {
@@ -22,6 +23,7 @@ type stateSamplePayload struct {
 	PeersWithAddrs  int            `json:"peers_with_addrs"`
 	ActiveConns     int            `json:"active_conns"`
 	TransportCounts map[string]int `json:"transport_counts"`
+	UptimeMs        uint64         `json:"uptime_ms"`
 }
 
 func (s *StateSampler) Run(ctx context.Context, wg *sync.WaitGroup) {
@@ -43,6 +45,7 @@ func (s *StateSampler) Run(ctx context.Context, wg *sync.WaitGroup) {
 				PeersWithAddrs:  len(s.ps.PeersWithAddrs()),
 				ActiveConns:     len(conns),
 				TransportCounts: transportTypes,
+				UptimeMs:        uint64(time.Since(s.startTime).Milliseconds()),
 			})
 		case <-ctx.Done():
 			return

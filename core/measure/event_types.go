@@ -46,7 +46,16 @@ const (
 	// Joinable with EventPingerQuery by query_id.
 	EventPongerQuery = "ponger-query"
 
-	// Peer record inspection result after a case-III FindPeer, tagged with the
-	// triggering query_id for correlation.
-	EventPeerRecordLookup = "peer-record-lookup"
+	// Per-receive marker emitted in handleConn before queuing the query for the
+	// worker. Redundant with EventPongerQuery in steady state (1:1 mapping); kept
+	// for debugging when the worker hangs and the per-query timestamps diverge.
+	EventPongerQueryRecv = "ponger-query-recv"
+
+	// Periodic snapshots of internal drop counters. Emitted every 60s plus once
+	// at shutdown. logger-dropped is the count of Log() calls that found the
+	// event channel full; lookup-dropped is the count of DHT LookupEvents that
+	// the subscriber's onEvent dropped because its own channel was full.
+	// Without these, a busy 24h run could lose events silently.
+	EventLoggerDropped = "logger-dropped"
+	EventLookupDropped = "lookup-dropped"
 )

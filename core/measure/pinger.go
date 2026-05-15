@@ -18,6 +18,7 @@ type Pinger struct {
 	dht         *dht.IpfsDHT
 	partnerPID  peer.ID
 	oobPinger   *OOBPinger
+	interval    time.Duration
 	logger      *Logger
 	seq         *Sequencer
 	outstanding atomic.Bool
@@ -42,12 +43,13 @@ type TargetSkipPayload struct {
 	Reason   string   `json:"reason"` // "empty"
 }
 
-func newPinger(h host.Host, d *dht.IpfsDHT, partnerPID peer.ID, oob *OOBPinger, logger *Logger, seq *Sequencer) *Pinger {
+func newPinger(h host.Host, d *dht.IpfsDHT, partnerPID peer.ID, oob *OOBPinger, interval time.Duration, logger *Logger, seq *Sequencer) *Pinger {
 	return &Pinger{
 		host:       h,
 		dht:        d,
 		partnerPID: partnerPID,
 		oobPinger:  oob,
+		interval:   interval,
 		logger:     logger,
 		seq:        seq,
 	}
@@ -56,7 +58,7 @@ func newPinger(h host.Host, d *dht.IpfsDHT, partnerPID peer.ID, oob *OOBPinger, 
 func (p *Pinger) Run(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
 
 	// Wait for in-flight doSend goroutines before returning, so logger.Log
@@ -123,22 +125,13 @@ func (p *Pinger) pickTarget(ctx context.Context, strategy Strategy) (peer.ID, bo
 	case StrategyRT:
 		return pickFromRoutingTable(p.dht, p.partnerPID)
 	case StrategyPS:
-		return pickFromPeerstore(p.host, p.rtPeerSet(), p.partnerPID)
+		return pickFromPeerstore(p.host, p.partnerPID)
 	case StrategyRandom:
 		// Bound the GetClosestPeers walk so a hanging pick doesn't block outstanding.
 		pickCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		defer cancel()
-		return pickRandomViaClosestPeers(pickCtx, p.dht, p.rtPeerSet(), p.host.ID(), p.partnerPID)
+		return pickRandomViaClosestPeers(pickCtx, p.dht, p.partnerPID)
 	default:
 		panic(fmt.Sprintf("pinger: unknown strategy %v", strategy))
 	}
-}
-
-func (p *Pinger) rtPeerSet() map[peer.ID]struct{} {
-	peers := p.dht.RoutingTable().ListPeers()
-	set := make(map[peer.ID]struct{}, len(peers))
-	for _, rp := range peers {
-		set[rp] = struct{}{}
-	}
-	return set
 }

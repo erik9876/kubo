@@ -19,6 +19,7 @@ type Config struct {
 	Mode                   Mode
 	LogDir                 string
 	SampleInterval         time.Duration
+	PingerInterval         time.Duration
 	PeerstoreTrackInterval time.Duration
 	OOBListenAddr          string
 	PartnerAddr            string
@@ -58,6 +59,15 @@ func LoadFromEnv() (Config, error) {
 		interval = d
 	}
 
+	pingerInterval := 15 * time.Second
+	if s, isPresent := os.LookupEnv("IPFS_MEASURE_PINGER_INTERVAL"); isPresent && s != "" {
+		d, err := time.ParseDuration(s)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid IPFS_MEASURE_PINGER_INTERVAL: %w", err)
+		}
+		pingerInterval = d
+	}
+
 	peerstoreTrackInterval := 30 * time.Second
 	if s, isPresent := os.LookupEnv("IPFS_MEASURE_PEERSTORE_TRACK_INTERVAL"); isPresent && s != "" {
 		d, err := time.ParseDuration(s)
@@ -86,6 +96,7 @@ func LoadFromEnv() (Config, error) {
 		Mode:                   mode,
 		LogDir:                 logDir,
 		SampleInterval:         interval,
+		PingerInterval:         pingerInterval,
 		PeerstoreTrackInterval: peerstoreTrackInterval,
 		OOBListenAddr:          oobListenAddr,
 		PartnerAddr:            partnerAddr,

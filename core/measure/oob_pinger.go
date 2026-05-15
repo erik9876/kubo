@@ -110,6 +110,7 @@ func (pc *OOBPinger) readLoop(cancel context.CancelFunc, conn net.Conn, wg *sync
 		case oobAck:
 			if v, ok := pc.pendingAcks.Load(m.QueryID); ok {
 				close(v.(chan struct{}))
+				pc.pendingAcks.Delete(m.QueryID)
 			}
 		case oobDone:
 			if v, ok := pc.pendingDones.Load(m.QueryID); ok {

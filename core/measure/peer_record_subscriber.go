@@ -8,6 +8,7 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/p2p/host/eventbus"
 )
 
 type PeerRecordSubscriber struct {
@@ -17,7 +18,7 @@ type PeerRecordSubscriber struct {
 }
 
 func newPeerRecordSubscriber(h host.Host, logger *Logger) (*PeerRecordSubscriber, error) {
-	sub, err := h.EventBus().Subscribe(new(event.EvtPeerIdentificationCompleted))
+	sub, err := h.EventBus().Subscribe(new(event.EvtPeerIdentificationCompleted), eventbus.BufSize(1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to subscribe to peer identification events: %w", err)
 	}

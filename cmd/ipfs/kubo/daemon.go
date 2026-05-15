@@ -535,7 +535,6 @@ func daemonFunc(req *cmds.Request, re cmds.ResponseEmitter, env cmds.Environment
 	if err != nil {
 		return fmt.Errorf("measure: failed to start service: %w", err)
 	}
-	defer measureService.Close()
 	// +++ end measurement service +++
 
 	if node.PNetFingerprint != nil {
@@ -606,6 +605,7 @@ take effect.
 		default:
 		}
 	}()
+	defer measureService.Close()
 
 	// Clear any cached offline node and set the online daemon node
 	// This ensures HTTP RPC server uses the online node, not any cached offline node

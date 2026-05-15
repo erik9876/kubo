@@ -58,9 +58,10 @@ func pickFromRoutingTable(rt *dht.IpfsDHT, exclude peer.ID) (peer.ID, bool) {
 	peers := rt.RoutingTable().ListPeers()
 	filtered := make([]peer.ID, 0, len(peers))
 	for _, p := range peers {
-		if p != exclude {
-			filtered = append(filtered, p)
+		if p == exclude {
+			continue
 		}
+		filtered = append(filtered, p)
 	}
 	if len(filtered) == 0 {
 		return "", false
@@ -68,16 +69,12 @@ func pickFromRoutingTable(rt *dht.IpfsDHT, exclude peer.ID) (peer.ID, bool) {
 	return filtered[mrand.Intn(len(filtered))], true
 }
 
-func pickFromPeerstore(h host.Host, rtPeers map[peer.ID]struct{}, exclude peer.ID) (peer.ID, bool) {
+func pickFromPeerstore(h host.Host, exclude peer.ID) (peer.ID, bool) {
 	ps := h.Peerstore()
-	self := h.ID()
 	peers := ps.Peers()
 	filtered := make([]peer.ID, 0, len(peers))
 	for _, p := range peers {
-		if p == exclude || p == self {
-			continue
-		}
-		if _, isRTPeer := rtPeers[p]; isRTPeer {
+		if p == exclude {
 			continue
 		}
 		supports, err := ps.SupportsProtocols(p, "/ipfs/kad/1.0.0") // dht server approximation
@@ -92,7 +89,7 @@ func pickFromPeerstore(h host.Host, rtPeers map[peer.ID]struct{}, exclude peer.I
 	return filtered[mrand.Intn(len(filtered))], true
 }
 
-func pickRandomViaClosestPeers(ctx context.Context, kdht *dht.IpfsDHT, rtPeers map[peer.ID]struct{}, selfID, exclude peer.ID) (peer.ID, bool) {
+func pickRandomViaClosestPeers(ctx context.Context, kdht *dht.IpfsDHT, excludeID peer.ID) (peer.ID, bool) {
 	randomKey := make([]byte, 32)
 	if _, err := crand.Read(randomKey); err != nil {
 		fmt.Fprintf(os.Stderr, "measure: error generating random key: %v\n", err)
@@ -106,10 +103,7 @@ func pickRandomViaClosestPeers(ctx context.Context, kdht *dht.IpfsDHT, rtPeers m
 	}
 	filtered := make([]peer.ID, 0, len(peers))
 	for _, p := range peers {
-		if p == exclude || p == selfID {
-			continue
-		}
-		if _, isRTPeer := rtPeers[p]; isRTPeer {
+		if p == excludeID {
 			continue
 		}
 		filtered = append(filtered, p)

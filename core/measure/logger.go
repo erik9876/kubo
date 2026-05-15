@@ -53,11 +53,20 @@ func (l *Logger) safeGetFile(eventType string) (*os.File, error) {
 	return f, nil
 }
 
+// droppedPayload is the body of EventLoggerDropped / EventLookupDropped.
+// The counter is monotonic over the lifetime of the process; consumers should
+// diff consecutive samples to get a per-window drop rate.
+type droppedPayload struct {
+	Dropped uint64 `json:"dropped"`
+}
+
 func (l *Logger) writeLoop() {
 	defer l.wg.Done()
 
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
+	syncTicker := time.NewTicker(5 * time.Second)
+	defer syncTicker.Stop()
+	droppedTicker := time.NewTicker(60 * time.Second)
+	defer droppedTicker.Stop()
 
 	for {
 		select {
@@ -65,22 +74,43 @@ func (l *Logger) writeLoop() {
 			if !ok {
 				return
 			}
-			file, err := l.safeGetFile(event.Type)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "measure: failed to open log file: %v\n", err)
-				continue
-			}
-			data, err := json.Marshal(event)
-			if err != nil {
-				continue
-			}
-			file.Write(append(data, '\n'))
+			l.writeEvent(event)
 
-		case <-ticker.C:
+		case <-syncTicker.C:
 			for _, f := range l.files {
 				f.Sync()
 			}
+
+		case <-droppedTicker.C:
+			// Write directly via writeEvent (not via the events channel) so
+			// the dropped-snapshot itself can never be dropped — that would
+			// be the one event you really need when investigating drops.
+			l.writeEvent(l.droppedEvent())
 		}
+	}
+}
+
+// writeEvent is the single point of file IO. Called only from writeLoop and
+// from Close (after writeLoop has exited), so no synchronization on l.files
+// is needed.
+func (l *Logger) writeEvent(event Event) {
+	file, err := l.safeGetFile(event.Type)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "measure: failed to open log file: %v\n", err)
+		return
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		return
+	}
+	file.Write(append(data, '\n'))
+}
+
+func (l *Logger) droppedEvent() Event {
+	return Event{
+		Timestamp: time.Now(),
+		Type:      EventLoggerDropped,
+		Payload:   droppedPayload{Dropped: atomic.LoadUint64(&l.dropped)},
 	}
 }
 
@@ -96,6 +126,9 @@ func (l *Logger) Log(eventType string, payload any) {
 func (l *Logger) Close() error {
 	close(l.events)
 	l.wg.Wait()
+	// writeLoop is done; safe to touch files map without coordination.
+	// Emit a final snapshot so the end-of-run drop total is always on disk.
+	l.writeEvent(l.droppedEvent())
 	for _, f := range l.files {
 		f.Sync()
 		f.Close()
