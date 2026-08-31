@@ -1,0 +1,109 @@
+
+========================================================================
+# Run window
+========================================================================
+start 2026-05-15 16:49:11.760572510+00:00  end 2026-05-17 08:49:23.435620245+00:00  (UTC)
+duration 40.0 h
+probes per strategy: {'rt': 2451, 'ps': 2451, 'random': 2404}
+
+========================================================================
+# Table 1: peers queried per lookup
+========================================================================
+                        n   p50  mean   p90    p99
+Node Origin                                       
+A    background      1951  14.0  17.9  30.0   87.0
+     pool discovery  2451  22.0  42.4  86.0  263.0
+B    background      2392  19.0  25.3  47.0  140.0
+     forwarding      3259  14.0  25.7  69.0  223.0
+C    background      2235  18.0  25.4  52.0  124.0
+-> out/sidechannel_ecdf_num_queried.pdf
+
+========================================================================
+# Case III lookup breadth by selection strategy
+========================================================================
+             n   p50  mean
+strategy                  
+rt         711  12.0  20.9
+ps        1048  17.0  31.6
+random    1411  12.0  20.8
+
+lookups that reached the target:
+             n   p50  mean  reached %
+strategy                             
+rt         630  11.0  11.9       88.6
+ps         564  11.0  12.5       53.8
+random    1251  10.0  11.3       88.7
+
+terminate_reason counts:
+terminate_reason  completed  starvation  stopped
+strategy                                        
+rt                       81           0      630
+ps                      477           7      564
+random                  156           4     1251
+
+========================================================================
+# Table 2: case distribution per selection strategy (%)
+========================================================================
+case_path    I  II_ok  II_fail_III   III
+strategy                                
+rt         146   1579           15   711
+ps         196   1164           43  1048
+random      69    886           38  1411 
+
+                  I   II-A  II-B    III
+strategy                               
+Routing Table  5.96  64.42  0.61  29.01
+Peerstore      8.00  47.49  1.75  42.76
+Random Lookup  2.87  36.86  1.58  58.69
+
+Case I range across strategies: 2.9 to 8.0%
+-> out/case_distribution_by_strategy.pdf
+
+========================================================================
+# Table 3: forwarding readiness latency (successful attempts; ms)
+========================================================================
+           attempts  successful      p50      p90      p99  fail %
+case_path                                                         
+I               411         411      0.0      0.0      0.0     0.0
+II-A           3629        3629    292.0   1021.0   3817.3     0.0
+II-B             96          33  16319.0  32812.6  46974.1    65.6
+III            3170        2445    387.0   1418.4  11128.8    22.9
+note: II-B percentiles rest on 33 of 96 attempts
+
+========================================================================
+# Stale addresses (Case II)
+========================================================================
+stale share of peerstore hits: 2.6% (96 / 3725)
+          fail %     n
+age_bin               
+<1min       3.82   288
+1-10min     2.04  1130
+10-60min    2.72  1654
+>60min      2.49   642
+fail rate across age bins: 2.0 to 3.8%
+
+========================================================================
+# Case III failure by strategy
+========================================================================
+             n  fail_pct  lookup_pct  connect_pct
+strategy                                         
+rt         711      11.4        11.4          0.0
+ps        1048      46.2        46.2          0.0
+random    1411      11.3        11.3          0.0
+ALL       3170      22.9        22.9          0.0
+
+========================================================================
+# Peerstore and connections
+========================================================================
+A: peers_with_addrs end=31192  last-hour growth=+351  conns median=442
+B: peers_with_addrs end=32240  last-hour growth=+299  conns median=256
+C: peers_with_addrs end=31924  last-hour growth=+298  conns median=233
+A holds most connections in 94% of samples
+-> out/peerstore_vs_conns.pdf
+
+========================================================================
+# Connection lifetime
+========================================================================
+A: n=2,643,862  median=24.5 s  <30s=96.5%
+B: n=1,536,770  median=25.3 s  <30s=93.2%
+C: n=1,378,088  median=24.8 s  <30s=94.9%
